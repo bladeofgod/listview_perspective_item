@@ -1,4 +1,5 @@
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
@@ -50,9 +51,11 @@ class DemoPageState extends State<DemoPage> {
 
   Widget listView(Size size){
     return ListView(
+      padding: EdgeInsets.all(0),
+      key: key,
       controller: controller,
       children: List.generate(30, (index){
-        return index == 0 ? specialOne(size): Container(
+        return (index == 10 || index == 5) ? specialOne(size): Container(
           width: size.width,height: size.height/6,
           color: index % 2 == 0 ? Colors.blue : Colors.red,
         );
@@ -65,7 +68,8 @@ class DemoPageState extends State<DemoPage> {
   Widget specialOne(Size size){
     return Container(
       width: size.width,height: size.height/6,
-      child: DrawImageItem(size: size, controller: controller),
+      child: DrawImageItem(size: size, controller: controller,viewPortHeight: size.height/6,
+        parentKey: key,),
     );
   }
 
@@ -76,11 +80,14 @@ class DemoPageState extends State<DemoPage> {
 class DrawImageItem extends StatefulWidget{
   final Size size;
   final ScrollController controller;
+  final double viewPortHeight;
+  final GlobalKey parentKey;
 
-  const DrawImageItem({Key key, @required this.size,@required this.controller}) : super(key: key);
+  const DrawImageItem({Key key, @required this.size,@required this.controller,this.viewPortHeight
+  ,this.parentKey}) : super(key: key);
   @override
   State<StatefulWidget> createState() {
-    return DrawImageItemState(size,controller);
+    return DrawImageItemState(size,controller,viewPortHeight,parentKey);
   }
 
 }
@@ -88,11 +95,21 @@ class DrawImageItem extends StatefulWidget{
 class DrawImageItemState extends State<DrawImageItem> {
   final Image image = Image.asset('assets/lemon.png');
   final ScrollController controller;
+  final double viewPortHeight;
+  final GlobalKey parentKey;
 
   final Size size ;
 
   ui.Image uiImage;
-  DrawImageItemState(this.size,this.controller);
+  DrawImageItemState(this.size,this.controller,this.viewPortHeight,this.parentKey);
+
+  ///屏幕/图片
+  double widthRatio;
+  double heightRatio;
+  ///image
+  Rect srcRect ;
+  ///view
+  Rect dstRect ;
 
   @override
   void initState() {
@@ -102,6 +119,10 @@ class DrawImageItemState extends State<DrawImageItem> {
       newStream.addListener(ImageStreamListener((image,_){
         if(image?.image != null){
           uiImage = image.image;
+          widthRatio = uiImage.width / size.width;
+          heightRatio = uiImage.height / size.height;
+          initRect();
+          initListener();
           setState(() {
 
           });
@@ -109,19 +130,48 @@ class DrawImageItemState extends State<DrawImageItem> {
       }));
     });
 
-    initListener();
+
 
 
   }
+  void initRect(){
+    final RenderBox renderBox = context.findRenderObject() as RenderBox;
+    Offset globalPos = renderBox.localToGlobal(Offset.zero,ancestor: parentKey.currentContext.findRenderObject());
+    debugPrint('$globalPos');
+    srcRect = Rect.fromLTWH(
+        globalPos.dx,
+        math.min(globalPos.dy*heightRatio, uiImage.height.floorToDouble() - (viewPortHeight*widthRatio)),
+        size.width * widthRatio,
+        viewPortHeight * heightRatio);
+    dstRect = Rect.fromLTWH(
+        0,
+        0,
+        //math.min(globalPos.dy, size.height-viewPortHeight),
+        size.width,
+        viewPortHeight);
+  }
 
-  double topDis = 0;
+
+
+
+
+
   void initListener(){
     controller.addListener(() {
       if(mounted && context != null){
         final RenderBox renderBox = context.findRenderObject() as RenderBox;
-        Offset globalPos = renderBox.localToGlobal(Offset.zero);
-        topDis = globalPos.dy;
-        debugPrint('-- $topDis');
+        final Offset dstOffset = renderBox.localToGlobal(Offset.zero,ancestor: parentKey.currentContext.findRenderObject());
+        //debugPrint('$heightRatio -- $dstOffset');
+        final Offset realOffset = dstOffset.dy <= 0
+            ? Offset(dstOffset.dx,0)
+             : (dstOffset.dy * heightRatio) >= uiImage.height
+                ? Offset(dstOffset.dx,uiImage.height.toDouble()) :dstOffset;
+        srcRect = Rect.fromLTWH(
+            realOffset.dx,
+            math.min(realOffset.dy*heightRatio, uiImage.height.floorToDouble() - (viewPortHeight*widthRatio)),
+            size.width * widthRatio,
+            viewPortHeight * heightRatio);
+        //dstRect = dstRect.shift(realOffset);
         setState(() {
 
         });
@@ -141,67 +191,75 @@ class DrawImageItemState extends State<DrawImageItem> {
     );
   }
 
+
+
   @override
   Widget build(BuildContext context) {
 
     return uiImage == null ?
     Center(child: Text('loading'),)
         :  CustomPaint(
-      painter: MyPaint(uiImage,size,topDis,size.height/6),
+      painter: MyPaint(uiImage,srcRect,dstRect),
     );
     //slideViewPort(size);
   }
 
 
 
-  Widget slideViewPort(Size size){
-    return GestureDetector(
-      onVerticalDragEnd: (endDetails){
-        //topDis = 0;
-      },
-      onVerticalDragUpdate: (updateDetails){
-        topDis += updateDetails.delta.dy;
-        topDis = math.min(0, topDis);
-        setState(() {
-
-        });
-
-      },
-      child: CustomPaint(
-        painter: MyPaint(uiImage,size,topDis,300),
-      ),
-    );
-  }
+//  Widget slideViewPort(Size size){
+//    return GestureDetector(
+//      onVerticalDragEnd: (endDetails){
+//        //topDis = 0;
+//      },
+//      onVerticalDragUpdate: (updateDetails){
+////        topDis += updateDetails.delta.dy;
+////        topDis = math.min(0, topDis);
+////        setState(() {
+////
+////        });
+//
+//      },
+//      child: CustomPaint(
+//        painter: MyPaint(uiImage,size,topDis,300),
+//      ),
+//    );
+//  }
 
 }
 
 
 
 class MyPaint extends CustomPainter{
-
-  final double viewPortHeight;
   final ui.Image _image;
-  final Size size;
-  final double widthRatio;
-  final double heightRatio;
-  ///顶部偏移
-  final double topDelta;
+  final Rect srcRect ;
+  final Rect dstRect ;
+  MyPaint(this._image, this.srcRect, this.dstRect);
 
-  MyPaint(this._image,this.size,this.topDelta,this.viewPortHeight)
-      : widthRatio = _image.width / size.width,
-        heightRatio = _image.height / size.height{
-    srcRect= Rect.fromLTWH(0,math.min(topDelta*widthRatio, _image.height.floorToDouble() - (viewPortHeight*widthRatio)),
-        size.width * widthRatio, viewPortHeight * heightRatio);
-    dstRect = Rect.fromLTWH(0,math.min(topDelta, size.height-viewPortHeight), size.width, viewPortHeight);
-  }
 
-  Rect srcRect ;
-  Rect dstRect ;
+//  final double viewPortHeight;
+//  final ui.Image _image;
+//  final Size size;
+//  final double widthRatio;
+//  final double heightRatio;
+//  ///顶部偏移
+//  final double topDelta;
+
+//  MyPaint(this._image,this.size,this.topDelta,this.viewPortHeight)
+//      : widthRatio = _image.width / size.width,
+//        heightRatio = _image.height / size.height{
+//    srcRect= Rect.fromLTWH(0,math.min(topDelta*widthRatio, _image.height.floorToDouble() - (viewPortHeight*widthRatio)),
+//        size.width * widthRatio, viewPortHeight * heightRatio);
+//    dstRect = Rect.fromLTWH(0,math.min(topDelta, size.height-viewPortHeight), size.width, viewPortHeight);
+//  }
+
+
   final Paint myPaint = Paint()..isAntiAlias = true;
+
+
 
   @override
   void paint(Canvas canvas, Size size) {
-    debugPrint('$srcRect');
+    //debugPrint('$srcRect');
     canvas.drawImageRect(_image, srcRect, dstRect, myPaint);
   }
 
